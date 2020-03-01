@@ -1,0 +1,618 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Miro Stack ASG",
+  "Parameters": {
+    "ami": {
+      "Description": "ami",
+      "Type": "String"
+    },
+    "continent": {
+      "Description": "continent",
+      "Type": "String"
+    },
+    "topicEmailAddress": {
+      "Description": "topicEmailAddress",
+      "Type": "String"
+    },
+    "instanceType": {
+      "Description": "instanceType",
+      "Type": "String"
+    },
+    "publicSubnet1": {
+      "Description": "publicSubnet1",
+      "Type": "String"
+    },
+    "publicSubnet2": {
+      "Description": "publicSubnet2",
+      "Type": "String"
+    },
+    "privateSubnet1": {
+      "Description": "privateSubnet1",
+      "Type": "String"
+    },
+    "privateSubnet2": {
+      "Description": "privateSubnet2",
+      "Type": "String"
+    },
+    "securityGroupPublic": {
+      "Description": "securityGroupPublic",
+      "Type": "String"
+    },
+    "securityGroupPrivate": {
+      "Description": "securityGroupPrivate",
+      "Type": "String"
+    },
+    "artifactVersion": {
+      "Description": "artifactVersion",
+      "Type": "String"
+    },
+    "openJDKVersion": {
+      "Description": "openJDKVersion",
+      "Type": "String"
+    },
+    "s3BucketArtifacts": {
+      "Description": "s3 bucket name for other resources",
+      "Type": "String"
+    },
+    "keyPair": {
+      "Description": "Name of an existing EC2 key pair for SSH access to the EC2 instances",
+      "Type": "AWS::EC2::KeyPair::KeyName"
+    },
+    "domainName": {
+      "Description": "domainName",
+      "Type": "String"
+    },
+    "createDNSEntry": {
+      "Description": "createDNSEntry",
+      "Type": "String",
+      "AllowedValues": [
+        "Yes",
+        "No"
+      ]
+    },
+    "vpcId": {
+      "Description": "vpcId",
+      "Type": "String"
+    }
+  },
+  "Conditions": {
+    "isCreateDNSEntry": {
+      "Fn::Equals": [
+        {
+          "Ref": "createDNSEntry"
+        },
+        "Yes"
+      ]
+    }
+  },
+  "Resources": {
+    "topicAutoScaling": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "DisplayName": "Auto-Scaling",
+        "Subscription": [
+          {
+            "Endpoint": {
+              "Ref": "topicEmailAddress"
+            },
+            "Protocol": "email"
+          }
+        ]
+      }
+    },
+    "sslCertificate": {
+      "Type": "AWS::CertificateManager::Certificate",
+      "Properties": {
+        "DomainName": {
+          "Fn::Join": [
+            "",
+            [
+              "*.",
+              {
+                "Ref": "domainName"
+              }
+            ]
+          ]
+        },
+        "DomainValidationOptions": [
+          {
+            "DomainName": {
+              "Fn::Join": [
+                "",
+                [
+                  "*.",
+                  {
+                    "Ref": "domainName"
+                  }
+                ]
+              ]
+            },
+            "ValidationDomain": {
+              "Ref": "domainName"
+            }
+          }
+        ]
+      }
+    },
+    "loadBalancer": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Name": "LoadBalancer",
+        "Scheme": "internet-facing",
+        "SecurityGroups": [
+          {
+            "Ref": "securityGroupPublic"
+          }
+        ],
+        "Subnets": [
+          {
+            "Ref": "publicSubnet1"
+          },
+          {
+            "Ref": "publicSubnet2"
+          }
+        ]
+      }
+    },
+    "listenerHttps": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "targetGroup"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "loadBalancer"
+        },
+        "Port": "443",
+        "Protocol": "HTTPS",
+        "Certificates": [
+          {
+            "CertificateArn": {
+              "Ref": "sslCertificate"
+            }
+          }
+        ]
+      }
+    },
+    "listenerHttp": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "redirect",
+            "RedirectConfig": {
+              "Protocol": "HTTPS",
+              "Host": "#{host}",
+              "Port": "443",
+              "Path": "/#{path}",
+              "Query": "#{query}",
+              "StatusCode": "HTTP_301"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "loadBalancer"
+        },
+        "Port": "80",
+        "Protocol": "HTTP"
+      }
+    },
+    "targetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "Name": "TargetGroup",
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckPort": 8080,
+        "HealthCheckPath": "/swagger-ui.html",
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 4,
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "Port": 8080,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "20"
+          }
+        ],
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Ref": "vpcId"
+        }
+      }
+    },
+    "rootRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "root",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "*",
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "instanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [
+          {
+            "Ref": "rootRole"
+          }
+        ]
+      }
+    },
+    "launchConfiguration": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Properties": {
+        "ImageId": {
+          "Ref": "ami"
+        },
+        "InstanceType": {
+          "Ref": "instanceType"
+        },
+        "KeyName": {
+          "Ref": "keyPair"
+        },
+        "IamInstanceProfile": {
+          "Ref": "instanceProfile"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "securityGroupPrivate"
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash -ex\n",
+                "cd /root \n",
+                "aws s3 cp  s3://",
+                {
+                  "Ref": "s3BucketArtifacts"
+                },
+                "/miro-",
+                {
+                  "Ref": "artifactVersion"
+                },
+                ".jar . --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                " \n",
+                "amazon-linux-extras install java-openjdk",
+                {
+                  "Ref": "openJDKVersion"
+                },
+                " -y \n",
+               
+                "# install Cloud Watch Monitoring Scripts \n",
+                "wget https://aws-cloudwatch.s3.amazonaws.com/downloads/CloudWatchMonitoringScripts-1.2.2.zip -O CloudWatchMonitoringScripts.zip \n",
+                "sudo yum install -y perl-Switch perl-DateTime perl-Sys-Syslog perl-LWP-Protocol-https perl-Digest-SHA.x86_64 \n",
+                "unzip CloudWatchMonitoringScripts.zip \n",
+                "rm CloudWatchMonitoringScripts.zip \n",
+                "sudo chown -hR root:root aws-scripts-mon \n",
+                "echo '*/5 * * * * aws-scripts-mon/mon-put-instance-data.pl --auto-scaling --mem-util --swap-util --disk-space-util --disk-path=/' > resource_usage.cron \n",
+                "crontab resource_usage.cron \n",
+                "java -jar miro-",
+                {
+                  "Ref": "artifactVersion"
+                },
+                ".jar & \n"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "autoScalingGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "privateSubnet1"
+          },
+          {
+            "Ref": "privateSubnet2"
+          }
+        ],
+        "Cooldown": "300",
+        "DesiredCapacity": "1",
+        "TargetGroupARNs": [
+          {
+            "Ref": "targetGroup"
+          }
+        ],
+        "HealthCheckGracePeriod": "100",
+        "HealthCheckType": "ELB",
+        "MaxSize": "3",
+        "MinSize": "1",
+        "NotificationConfigurations": [
+          {
+            "TopicARN": {
+              "Ref": "topicAutoScaling"
+            },
+            "NotificationTypes": [
+              "autoscaling:EC2_INSTANCE_LAUNCH",
+              "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
+              "autoscaling:EC2_INSTANCE_TERMINATE",
+              "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"
+            ]
+          }
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "launchConfiguration"
+        },
+        "TerminationPolicies": [
+          "Default"
+        ]
+      }
+    },
+    "scalingDecreaseGroupSize": {
+      "Type": "AWS::AutoScaling::ScalingPolicy",
+      "Properties": {
+        "AdjustmentType": "ChangeInCapacity",
+        "PolicyType": "StepScaling",
+        "StepAdjustments": [
+          {
+            "ScalingAdjustment": 0,
+            "MetricIntervalUpperBound": 0.0
+          }
+        ],
+        "AutoScalingGroupName": {
+          "Ref": "autoScalingGroup"
+        }
+      }
+    },
+    "scalingIncreaseGroupSize": {
+      "Type": "AWS::AutoScaling::ScalingPolicy",
+      "Properties": {
+        "AdjustmentType": "ChangeInCapacity",
+        "PolicyType": "StepScaling",
+        "StepAdjustments": [
+          {
+            "ScalingAdjustment": 0,
+            "MetricIntervalLowerBound": 0.0
+          }
+        ],
+        "AutoScalingGroupName": {
+          "Ref": "autoScalingGroup"
+        }
+      }
+    },
+    "scaleDownAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "ActionsEnabled": "true",
+        "ComparisonOperator": "LessThanThreshold",
+        "EvaluationPeriods": "1",
+        "MetricName": "CPUUtilization",
+        "Namespace": "AWS/EC2",
+        "Period": "900",
+        "Statistic": "Average",
+        "Threshold": "10.0",
+        "AlarmActions": [
+          {
+            "Ref": "topicAutoScaling"
+          },
+          {
+            "Ref": "scalingDecreaseGroupSize"
+          }
+        ],
+        "Dimensions": [
+          {
+            "Name": "AutoScalingGroupName",
+            "Value": {
+              "Ref": "autoScalingGroup"
+            }
+          }
+        ]
+      }
+    },
+    "scaleUpAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "ActionsEnabled": "true",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "EvaluationPeriods": "1",
+        "MetricName": "CPUUtilization",
+        "Namespace": "AWS/EC2",
+        "Period": "300",
+        "Statistic": "Average",
+        "Threshold": "30.0",
+        "AlarmActions": [
+          {
+            "Ref": "scalingIncreaseGroupSize"
+          },
+          {
+            "Ref": "topicAutoScaling"
+          }
+        ],
+        "Dimensions": [
+          {
+            "Name": "AutoScalingGroupName",
+            "Value": {
+              "Ref": "autoScalingGroup"
+            }
+          }
+        ]
+      }
+    },
+    "dnsmirocomEuropeanDNSQueries": {
+      "Type": "AWS::Route53::RecordSetGroup",
+      "Condition": "isCreateDNSEntry",
+      "Properties": {
+        "HostedZoneName": {
+          "Fn::Join": [
+            "",
+            [
+              {
+                "Ref": "domainName"
+              },
+              "."
+            ]
+          ]
+        },
+        "RecordSets": [
+          {
+            "Name": {
+              "Fn::Join": [
+                "",
+                [
+                  "www.",
+                  {
+                    "Ref": "domainName"
+                  },
+                  "."
+                ]
+              ]
+            },
+            "Type": "A",
+            "AliasTarget": {
+              "HostedZoneId": {
+                "Fn::GetAtt": [
+                  "loadBalancer",
+                  "CanonicalHostedZoneID"
+                ]
+              },
+              "DNSName": {
+                "Fn::GetAtt": [
+                  "loadBalancer",
+                  "DNSName"
+                ]
+              }
+            }
+          },
+          {
+            "Name": {
+              "Fn::Join": [
+                "",
+                [
+                  "api.",
+                  {
+                    "Ref": "domainName"
+                  },
+                  "."
+                ]
+              ]
+            },
+            "Type": "A",
+            "AliasTarget": {
+              "HostedZoneId": {
+                "Fn::GetAtt": [
+                  "loadBalancer",
+                  "CanonicalHostedZoneID"
+                ]
+              },
+              "DNSName": {
+                "Fn::GetAtt": [
+                  "loadBalancer",
+                  "DNSName"
+                ]
+              }
+            }
+          },
+          {
+            "Name": {
+              "Fn::Join": [
+                "",
+                [
+                  "",
+                  {
+                    "Ref": "domainName"
+                  },
+                  "."
+                ]
+              ]
+            },
+            "Type": "A",
+            "AliasTarget": {
+              "HostedZoneId": {
+                "Fn::GetAtt": [
+                  "loadBalancer",
+                  "CanonicalHostedZoneID"
+                ]
+              },
+              "DNSName": {
+                "Fn::GetAtt": [
+                  "loadBalancer",
+                  "DNSName"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "loadBalancer": {
+      "Value": {
+        "Ref": "loadBalancer"
+      }
+    },
+    "loadBalancerURL": {
+      "Description": "Loadbalancer URL",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "http://",
+            {
+              "Fn::GetAtt": [
+                "loadBalancer",
+                "DNSName"
+              ]
+            },
+            "/"
+          ]
+        ]
+      }
+    },
+    "loadBalancerDNSName": {
+      "Value": {
+        "Fn::GetAtt": [
+          "loadBalancer",
+          "DNSName"
+        ]
+      }
+    }
+  }
+}

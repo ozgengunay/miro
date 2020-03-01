@@ -1,0 +1,342 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Miro Stack",
+  "Parameters": {
+    "topicEmailAddress": {
+      "Description": "topicEmailAddress",
+      "Type": "String",
+      "Default": "ogunay@goldennode.io"
+    },
+    "dbInstanceClass": {
+      "Description": "dbInstanceClass",
+      "Type": "String",
+      "Default": "db.t2.micro"
+    },
+    "bastionInstanceType": {
+      "Description": "bastionInstanceType",
+      "Type": "String",
+      "Default": "t2.micro"
+    },
+    "instanceType": {
+      "Description": "instanceType",
+      "Type": "String",
+      "Default": "t2.micro"
+    },
+    "s3BucketCloudFormation": {
+      "Description": "s3 bucket name for cf",
+      "Type": "String",
+      "Default": "miro-cf"
+    },
+    "s3BucketArtifacts": {
+      "Description": "s3 bucket name for artifacts",
+      "Type": "String",
+      "Default": "miro-artifacts"
+    },
+    "artifactVersion": {
+      "Description": "artifactVersion",
+      "Type": "String",
+      "Default": "0.0.1-SNAPSHOT"
+    },
+    "openJDKVersion": {
+      "Description": "openJDKVersion",
+      "Type": "String",
+      "Default": "1.8.0"
+    },
+    "keyPair": {
+      "Description": "Name of an existing EC2 key pair for SSH access to the EC2 instances",
+      "Type": "AWS::EC2::KeyPair::KeyName"
+    },
+    "domainName": {
+      "Description": "domainName",
+      "Type": "String",
+      "Default": "goldennode.io"
+    },
+    "createDNSEntry": {
+      "Description": "createDNSEntry",
+      "Type": "String",
+      "AllowedValues": [
+        "Yes",
+        "No"
+      ],
+      "Default": "No"
+    }
+  },
+  "Mappings": {
+    "RegionMap": {
+      "us-east-1": {
+        "AMI": "ami-c58c1dd3",
+        "Name": "US East (N. Virginia)",
+        "Continent": "NA"
+      },
+      "us-east-2": {
+        "AMI": "ami-4191b524",
+        "Name": "US East (Ohio)",
+        "Continent": "NA"
+      },
+      "us-west-1": {
+        "AMI": "ami-7a85a01a",
+        "Name": "US West (N. California)",
+        "Continent": "NA"
+      },
+      "us-west-2": {
+        "AMI": "ami-4836a428",
+        "Name": "US West (Oregon)",
+        "Continent": "NA"
+      },
+      "ca-central-1": {
+        "AMI": "ami-0bd66a6f",
+        "Name": "Canada (Central)",
+        "Continent": "NA"
+      },
+      "eu-west-1": {
+        "AMI": "ami-01ccc867",
+        "Name": "EU (Ireland)",
+        "Continent": "EU"
+      },
+      "eu-central-1": {
+        "AMI": "ami-07cda0db070313c52",
+        "Name": "EU (Frankfurt)",
+        "Continent": "EU"
+      },
+      "eu-west-2": {
+        "AMI": "ami-b6daced2",
+        "Name": "EU (London)",
+        "Continent": "EU"
+      },
+      "ap-northeast-1": {
+        "AMI": "ami-923d12f5",
+        "Name": "Asia Pacific (Tokyo)",
+        "Continent": "AS"
+      },
+      "ap-northeast-2": {
+        "AMI": "ami-9d15c7f3",
+        "Name": "Asia Pacific (Seoul)",
+        "Continent": "AS"
+      },
+      "ap-southeast-1": {
+        "AMI": "ami-fc5ae39f",
+        "Name": "Asia Pacific (Singapore)",
+        "Continent": "AS"
+      },
+      "ap-southeast-2": {
+        "AMI": "ami-162c2575",
+        "Name": "Asia Pacific (Sydney)",
+        "Continent": "OC"
+      },
+      "ap-south-1": {
+        "AMI": "ami-52c7b43d",
+        "Name": "Asia Pacific (Mumbai)",
+        "Continent": "AS"
+      },
+      "sa-east-1": {
+        "AMI": "ami-37cfad5b",
+        "Name": "South America (São Paulo)",
+        "Continent": "SA"
+      }
+    }
+  },
+  "Resources": {
+    "stackMiroCore": {
+      "Type": "AWS::CloudFormation::Stack",
+      "Properties": {
+        "TemplateURL": {
+          "Fn::Join": [
+            "/",
+            [
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    "https://s3-",
+                    {
+                      "Ref": "AWS::Region"
+                    },
+                    ".amazonaws.com"
+                  ]
+                ]
+              },
+              {
+                "Ref": "s3BucketCloudFormation"
+              },
+              "miro-stack-core.json"
+            ]
+          ]
+        },
+        "TimeoutInMinutes": "30",
+        "Parameters": {
+          "ami": {
+            "Fn::FindInMap": [
+              "RegionMap",
+              {
+                "Ref": "AWS::Region"
+              },
+              "AMI"
+            ]
+          },
+          "bastionInstanceType": {
+            "Ref": "bastionInstanceType"
+          },
+          "keyPair": {
+            "Ref": "keyPair"
+          }
+        }
+      }
+    },
+    "stackMiroAsg": {
+      "Type": "AWS::CloudFormation::Stack",
+      "Properties": {
+        "TemplateURL": {
+          "Fn::Join": [
+            "/",
+            [
+              {
+                "Fn::Join": [
+                  "",
+                  [
+                    "https://s3-",
+                    {
+                      "Ref": "AWS::Region"
+                    },
+                    ".amazonaws.com"
+                  ]
+                ]
+              },
+              {
+                "Ref": "s3BucketCloudFormation"
+              },
+              "miro-stack-asg.json"
+            ]
+          ]
+        },
+        "TimeoutInMinutes": "30",
+        "Parameters": {
+          "ami": {
+            "Fn::FindInMap": [
+              "RegionMap",
+              {
+                "Ref": "AWS::Region"
+              },
+              "AMI"
+            ]
+          },
+          "continent": {
+            "Fn::FindInMap": [
+              "RegionMap",
+              {
+                "Ref": "AWS::Region"
+              },
+              "Continent"
+            ]
+          },
+          "topicEmailAddress": {
+            "Ref": "topicEmailAddress"
+          },
+          "instanceType": {
+            "Ref": "instanceType"
+          },
+          "publicSubnet1": {
+            "Fn::GetAtt": [
+              "stackMiroCore",
+              "Outputs.publicSubnet1"
+            ]
+          },
+          "publicSubnet2": {
+            "Fn::GetAtt": [
+              "stackMiroCore",
+              "Outputs.publicSubnet2"
+            ]
+          },
+          "privateSubnet1": {
+            "Fn::GetAtt": [
+              "stackMiroCore",
+              "Outputs.privateSubnet1"
+            ]
+          },
+          "privateSubnet2": {
+            "Fn::GetAtt": [
+              "stackMiroCore",
+              "Outputs.privateSubnet2"
+            ]
+          },
+          "securityGroupPublic": {
+            "Fn::GetAtt": [
+              "stackMiroCore",
+              "Outputs.securityGroupPublic"
+            ]
+          },
+          "securityGroupPrivate": {
+            "Fn::GetAtt": [
+              "stackMiroCore",
+              "Outputs.securityGroupPrivate"
+            ]
+          },
+          "artifactVersion": {
+            "Ref": "artifactVersion"
+          },
+          "openJDKVersion": {
+            "Ref": "openJDKVersion"
+          },
+          "s3BucketArtifacts": {
+            "Ref": "s3BucketArtifacts"
+          },
+          "keyPair": {
+            "Ref": "keyPair"
+          },
+          "domainName": {
+            "Ref": "domainName"
+          },
+          "createDNSEntry": {
+            "Ref": "createDNSEntry"
+          },
+          "vpcId": {
+            "Fn::GetAtt": [
+              "stackMiroCore",
+              "Outputs.vpcId"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "loadBalancerURL": {
+      "Description": "Loadbalancer URL",
+      "Value": {
+        "Fn::GetAtt": [
+          "stackMiroAsg",
+          "Outputs.loadBalancerURL"
+        ]
+      }
+    },
+    "loadBalancerDNSName": {
+      "Value": {
+        "Fn::GetAtt": [
+          "stackMiroAsg",
+          "Outputs.loadBalancerDNSName"
+        ]
+      }
+    },
+    "bastionIP": {
+      "Value": {
+        "Fn::GetAtt": [
+          "stackMiroCore",
+          "Outputs.bastionIP"
+        ]
+      }
+    },
+    "vpcId": {
+      "Value": {
+        "Fn::GetAtt": [
+          "stackMiroCore",
+          "Outputs.vpcId"
+        ]
+      }
+    },
+    "region": {
+      "Description": "AWS region this stack is in.",
+      "Value": {
+        "Ref": "AWS::Region"
+      }
+    }
+  }
+}
