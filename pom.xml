@@ -57,7 +57,7 @@
 		<mockito.version>2.28.2</mockito.version>
 		<maven-surefire-plugin.version>2.21.0</maven-surefire-plugin.version>
 		<!--SWAGGER -->
-		<swagger.version>2.9.2</swagger.version>
+		<swagger.version>2.10.0</swagger.version>
 		<!--PLUGINS -->
 		<pmd.version>3.8</pmd.version>
 		<maven.enforcer.plugin.version>1.4.1</maven.enforcer.plugin.version>
